@@ -35,7 +35,7 @@ const TOKEN_URL = "https://identity.xero.com/connect/token";
 const CONNECTIONS_URL = "https://api.xero.com/connections";
 const INVOICES_URL = "https://api.xero.com/api.xro/2.0/Invoices";
 const CONTACTS_URL = "https://api.xero.com/api.xro/2.0/Contacts";
-const SCOPES = "offline_access openid profile accounting.transactions accounting.contacts.read";
+const SCOPES = "offline_access openid profile accounting.invoices accounting.contacts";
 const RESEND_URL = "https://api.resend.com/emails";
 const GST_RATE = { OUTPUT2: 0.15, ZERORATED: 0, NONE: 0 };
 

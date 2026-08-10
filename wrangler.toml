@@ -4,4 +4,4 @@ compatibility_date = "2024-11-01"
 
 [[kv_namespaces]]
 binding = "XERO_TOKENS"
-id = "REPLACE_WITH_YOUR_KV_NAMESPACE_ID"
+id = "326a46f8b3534002998944d60abef92d"
