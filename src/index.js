@@ -10,6 +10,7 @@
  *   GET  /callback         -> Xero redirects here after you approve access
  *   GET  /status            -> check whether a Xero connection is stored
  *   GET  /contacts          -> list existing Xero customers (for the app's picker)
+ *   GET  /items             -> list existing Xero inventory items (for the app's code picker)
  *   POST /create-invoice  -> add lines to a DRAFT invoice in Xero, then email a
  *                             summary to the company inbox (called by the app)
  *
@@ -22,8 +23,12 @@
  * the XERO_TOKENS KV store.
  *
  * Required secrets (set with `wrangler secret put <NAME>`):
- *   XERO_CLIENT_ID, XERO_CLIENT_SECRET, API_KEY,
+ *   XERO_CLIENT_ID, XERO_CLIENT_SECRET, STAFF_USERNAME, STAFF_PASSWORD,
  *   RESEND_API_KEY, FROM_EMAIL, COMPANY_EMAIL
+ *
+ * STAFF_USERNAME/STAFF_PASSWORD is a single shared login (Basic Auth) that
+ * gates /contacts, /items and /create-invoice — same pattern as
+ * longburn-pay-frontend's owner login, not per-staff accounts.
  *
  * Required binding (see wrangler.toml):
  *   XERO_TOKENS  (KV namespace)
@@ -35,7 +40,8 @@ const TOKEN_URL = "https://identity.xero.com/connect/token";
 const CONNECTIONS_URL = "https://api.xero.com/connections";
 const INVOICES_URL = "https://api.xero.com/api.xro/2.0/Invoices";
 const CONTACTS_URL = "https://api.xero.com/api.xro/2.0/Contacts";
-const SCOPES = "offline_access openid profile accounting.invoices accounting.contacts";
+const ITEMS_URL = "https://api.xero.com/api.xro/2.0/Items";
+const SCOPES = "offline_access openid profile accounting.invoices accounting.contacts accounting.settings.read";
 const RESEND_URL = "https://api.resend.com/emails";
 const GST_RATE = { OUTPUT2: 0.15, ZERORATED: 0, NONE: 0 };
 
@@ -74,6 +80,7 @@ export default {
       if (url.pathname === "/callback") return handleCallback(url, env);
       if (url.pathname === "/status") return handleStatus(env);
       if (url.pathname === "/contacts") return handleContacts(request, env);
+      if (url.pathname === "/items") return handleItems(request, env);
       if (url.pathname === "/create-invoice" && request.method === "POST") {
         return handleCreateInvoice(request, env);
       }
@@ -190,11 +197,32 @@ async function getValidAccessToken(env) {
   return tokens;
 }
 
-async function handleContacts(request, env) {
-  const apiKey = request.headers.get("x-api-key") || new URL(request.url).searchParams.get("apiKey");
-  if (!apiKey || apiKey !== env.API_KEY) {
-    return json({ error: "Invalid or missing API key" }, 401);
+// Single shared staff login (matches the pattern used by longburn-pay-frontend):
+// the app sends "Authorization: Basic base64(username:password)" on every
+// protected call, checked here against the STAFF_USERNAME/STAFF_PASSWORD
+// secrets. Not per-staff accounts — one shared login for the team.
+function staffAuthorized(request, env) {
+  const header = request.headers.get("Authorization") || "";
+  if (!header.startsWith("Basic ")) return false;
+  let decoded;
+  try {
+    decoded = atob(header.slice(6));
+  } catch {
+    return false;
   }
+  const sep = decoded.indexOf(":");
+  if (sep === -1) return false;
+  const username = decoded.slice(0, sep);
+  const password = decoded.slice(sep + 1);
+  return username === env.STAFF_USERNAME && password === env.STAFF_PASSWORD;
+}
+
+function unauthorized() {
+  return json({ error: "Invalid or missing staff login" }, 401);
+}
+
+async function handleContacts(request, env) {
+  if (!staffAuthorized(request, env)) return unauthorized();
 
   const tokens = await getValidAccessToken(env);
   const contacts = [];
@@ -223,6 +251,31 @@ async function handleContacts(request, env) {
   return json({ contacts });
 }
 
+async function handleItems(request, env) {
+  if (!staffAuthorized(request, env)) return unauthorized();
+
+  const tokens = await getValidAccessToken(env);
+
+  // The Items endpoint isn't paginated the way Contacts is — one call returns everything.
+  const res = await fetch(`${ITEMS_URL}?where=IsSold==true&order=Code ASC`, {
+    headers: {
+      Authorization: `Bearer ${tokens.access_token}`,
+      "Xero-tenant-id": tokens.tenant_id,
+      Accept: "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const errText = await res.text();
+    return json({ error: "Could not fetch items from Xero", details: errText }, res.status);
+  }
+
+  const data = await res.json();
+  const items = (data.Items || []).map((i) => ({ code: i.Code, description: i.Description || null }));
+
+  return json({ items });
+}
+
 const OPEN_INVOICES_KEY = "open_invoices";
 const ENTRY_PRUNE_MS = 90 * 24 * 60 * 60 * 1000; // drop tracking entries older than ~90 days
 
@@ -241,10 +294,7 @@ async function saveOpenInvoices(env, map) {
 }
 
 async function handleCreateInvoice(request, env) {
-  const apiKey = request.headers.get("x-api-key");
-  if (!apiKey || apiKey !== env.API_KEY) {
-    return json({ error: "Invalid or missing API key" }, 401);
-  }
+  if (!staffAuthorized(request, env)) return unauthorized();
 
   const payload = await request.json();
   const { contactId, contactName, orderNumber, invoiceNumber, invoiceDate, dueDate, lineItems } = payload;
