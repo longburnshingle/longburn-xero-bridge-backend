@@ -228,10 +228,13 @@ async function handleContacts(request, env) {
   const contacts = [];
   let page = 1;
 
-  // Xero paginates at 100 per page. Loop until a page comes back short/empty.
+  // Not filtering by IsCustomer==true: that flag isn't reliably set on this
+  // org's contacts (some real customers show IsCustomer:false), so filtering
+  // on it silently hid every contact. Listing everyone is a better default
+  // than showing zero customers.
   while (page <= 10) {
     const res = await fetch(
-      `${CONTACTS_URL}?where=IsCustomer==true&order=Name ASC&page=${page}&summaryOnly=true`,
+      `${CONTACTS_URL}?order=Name ASC&page=${page}&summaryOnly=true`,
       {
         headers: {
           Authorization: `Bearer ${tokens.access_token}`,
