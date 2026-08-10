@@ -48,7 +48,7 @@ const GST_RATE = { OUTPUT2: 0.15, ZERORATED: 0, NONE: 0 };
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "Content-Type, x-api-key",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
   };
 }
