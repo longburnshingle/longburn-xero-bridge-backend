@@ -51,10 +51,12 @@ wrangler secret put XERO_CLIENT_ID
 wrangler secret put XERO_CLIENT_SECRET
 # paste the Client Secret from step 1
 
-wrangler secret put API_KEY
-# make up any long random password — this is what the invoice app
-# uses to prove it's allowed to call your worker. e.g. run:
-# openssl rand -hex 24
+wrangler secret put STAFF_USERNAME
+# the username staff will type to sign into the invoice app
+
+wrangler secret put STAFF_PASSWORD
+# the password staff will type to sign into the invoice app
+# this is a single shared login for the team, not per-staff accounts
 ```
 
 ### Email summary (optional but recommended)
@@ -136,7 +138,11 @@ https://longburn-industries-xero-bridge.<your-subdomain>.workers.dev/status
 
 Open the invoice builder app, scroll to **Xero Connection**, and enter:
 - **Worker URL**: `https://longburn-industries-xero-bridge.<your-subdomain>.workers.dev`
-- **API Key**: the value you set in step 4
+
+Then sign in at the app's login screen with the **STAFF_USERNAME** /
+**STAFF_PASSWORD** you set in step 4 — that's what authorises the app to
+call your worker now (there's no separate API key to paste in). The login
+is remembered for the browser tab's session; closing the tab signs out.
 
 Tap **Send to Xero (draft)** on any invoice from now on — it'll appear in
 Xero under **Business → Invoices → Drafts**, ready for you to check and approve.
@@ -156,6 +162,15 @@ up creating duplicate customers).
   confirm first.
 - Matched customers are linked by their actual Xero ContactID, so there's no
   ambiguity even if two customers have similar names.
+
+The same idea applies to product **Code**s on each invoice line:
+
+- Tap **🔄 Refresh product codes** to pull in your Xero inventory item codes
+  (Business → Products and Services).
+- A line's Code only gets sent to Xero as an item code once it matches a
+  synced item (shown as **✓ Xero item**) — an unmatched code (**⚠ not sent
+  as item code**) is still fine to use, it's just sent as plain text instead,
+  since Xero rejects the whole invoice if an item code doesn't exist.
 
 ## 9. Invoicing grouped by order
 
@@ -184,9 +199,13 @@ filling it in:
 
 ## Notes
 
-- Only you have the API key, so only your app can create invoices through
-  this worker.
+- Only staff who know the shared login can create invoices through this
+  worker — share `STAFF_USERNAME`/`STAFF_PASSWORD` only with people who
+  should be able to send invoices to Xero.
 - The worker never stores your Xero login — only an OAuth token it can use
   on your behalf, which you can revoke any time from Xero under
   **Settings → Connected apps**.
 - If Xero ever says "reconnect", just visit `/connect` again.
+- If you ever change which Xero permissions the worker asks for (the
+  `SCOPES` constant in `src/index.js`), you'll need to visit `/connect`
+  again too — an existing connection doesn't pick up new scopes on its own.
