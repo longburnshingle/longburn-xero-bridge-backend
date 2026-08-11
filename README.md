@@ -86,6 +86,15 @@ wrangler secret put COMPANY_EMAIL
 If you skip this section, invoice creation still works fine — you just won't
 get the email summary.
 
+Each summary email also comes with an Excel file attached — a running
+workbook for that calendar month (e.g. `2026-08-invoices.xlsx`), with a new
+row appended per line item every time an invoice is sent. It picks up right
+where the last one left off, so it opens ready to use with normal Excel
+formulas (SUM, filters, pivot tables) rather than needing reformatting. A
+fresh workbook starts automatically at the beginning of each month. This
+part works regardless of whether Resend is set up — the log itself doesn't
+need email, only the "get it emailed to you" part does.
+
 ## 5. Deploy
 
 ```bash
