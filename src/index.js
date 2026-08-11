@@ -11,6 +11,8 @@
  *   GET  /status            -> check whether a Xero connection is stored
  *   GET  /contacts          -> list existing Xero customers (for the app's picker)
  *   GET  /items             -> list existing Xero inventory items (for the app's code picker)
+ *   GET  /presets           -> fetch the team's saved product-code presets
+ *   PUT  /presets           -> replace the team's saved product-code presets
  *   POST /create-invoice  -> add lines to a DRAFT invoice in Xero, then email a
  *                             summary to the company inbox (called by the app)
  *
@@ -49,7 +51,7 @@ function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PUT, OPTIONS",
   };
 }
 
@@ -81,6 +83,8 @@ export default {
       if (url.pathname === "/status") return handleStatus(env);
       if (url.pathname === "/contacts") return handleContacts(request, env);
       if (url.pathname === "/items") return handleItems(request, env);
+      if (url.pathname === "/presets" && request.method === "GET") return handleGetPresets(request, env);
+      if (url.pathname === "/presets" && request.method === "PUT") return handleSavePresets(request, env);
       if (url.pathname === "/create-invoice" && request.method === "POST") {
         return handleCreateInvoice(request, env);
       }
@@ -277,6 +281,28 @@ async function handleItems(request, env) {
   const items = (data.Items || []).map((i) => ({ code: i.Code, description: i.Description || null }));
 
   return json({ items });
+}
+
+// ---- Saved product-code presets (shared across every device/browser) ----
+const PRESETS_KEY = "product_presets";
+
+async function handleGetPresets(request, env) {
+  if (!staffAuthorized(request, env)) return unauthorized();
+  const raw = await env.XERO_TOKENS.get(PRESETS_KEY);
+  return json({ presets: raw ? JSON.parse(raw) : [] });
+}
+
+async function handleSavePresets(request, env) {
+  if (!staffAuthorized(request, env)) return unauthorized();
+  let presets;
+  try {
+    presets = await request.json();
+  } catch {
+    return json({ error: "Body must be a JSON array of presets" }, 400);
+  }
+  if (!Array.isArray(presets)) return json({ error: "Body must be a JSON array of presets" }, 400);
+  await env.XERO_TOKENS.put(PRESETS_KEY, JSON.stringify(presets));
+  return json({ success: true, count: presets.length });
 }
 
 const OPEN_INVOICES_KEY = "open_invoices";
