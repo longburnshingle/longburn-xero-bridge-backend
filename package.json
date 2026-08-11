@@ -1,0 +1,24 @@
+{
+  "name": "xero-invoice-worker",
+  "version": "1.0.0",
+  "description": "This is a small server (a Cloudflare Worker — free tier is plenty) that sits between the invoice-builder app and Xero. It holds the Xero connection and creates DRAFT invoices when the app asks it to.",
+  "main": "src/index.js",
+  "scripts": {
+    "deploy": "wrangler deploy"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/longburnshingle/longburn-xero-bridge-backend.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/longburnshingle/longburn-xero-bridge-backend/issues"
+  },
+  "homepage": "https://github.com/longburnshingle/longburn-xero-bridge-backend#readme",
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}

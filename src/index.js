@@ -34,7 +34,14 @@
  *
  * Required binding (see wrangler.toml):
  *   XERO_TOKENS  (KV namespace)
+ *
+ * Every successful invoice also appends a row per line item to a running
+ * monthly Excel workbook (stored in XERO_TOKENS, one file per calendar
+ * month keyed off the invoice date), attached to the summary email so the
+ * company always has an open-in-Excel record of everything sent that month.
  */
+
+import * as XLSX from "xlsx";
 
 const TOKEN_KEY = "xero_tokens";
 const AUTHORIZE_URL = "https://login.xero.com/identity/connect/authorize";
@@ -425,18 +432,47 @@ async function handleCreateInvoice(request, env) {
     .map((li) => ({ description: li.Description, quantity: li.Quantity, unitAmount: li.UnitAmount, taxType: li.TaxType }))
     .concat(lineItems);
 
+  const finalInvoiceNumber = created?.InvoiceNumber || invoiceNumber;
+
+  // Append just this submission's lines (not the whole invoice-to-date —
+  // previously-added lines already got their own row on an earlier send)
+  // to this month's running Excel log.
+  let excelLog = null;
+  let excelLogError = null;
+  try {
+    const monthKey = monthKeyFor(invoiceDate);
+    const rows = lineItems.map((li) => [
+      contactName,
+      finalInvoiceNumber || "",
+      orderNumber.trim(),
+      invoiceDate || "",
+      dueDate || "",
+      li.itemCode || "",
+      li.description || "",
+      li.quantity || 0,
+      li.unitAmount || 0,
+      li.accountCode || "",
+      li.taxType || "",
+      Math.round(((li.quantity || 0) * (li.unitAmount || 0) + Number.EPSILON) * 100) / 100,
+    ]);
+    excelLog = await appendInvoiceRowsToExcelLog(env, monthKey, rows);
+  } catch (err) {
+    excelLogError = err.message || String(err);
+  }
+
   let emailSent = false;
   let emailError = null;
   try {
     if (env.RESEND_API_KEY && env.COMPANY_EMAIL) {
       await sendSummaryEmail(env, {
         contactName,
-        invoiceNumber: created?.InvoiceNumber || invoiceNumber,
+        invoiceNumber: finalInvoiceNumber,
         orderNumber,
         invoiceDate,
         dueDate,
         lineItems: emailLineItems,
         appended,
+        excelAttachment: excelLog,
       });
       emailSent = true;
     }
@@ -452,14 +488,56 @@ async function handleCreateInvoice(request, env) {
     appended,
     emailSent,
     emailError,
+    excelLogError,
   });
+}
+
+// ---- Monthly running Excel log (one workbook per calendar month) ----
+function monthKeyFor(dateStr) {
+  const valid = dateStr && /^\d{4}-\d{2}-\d{2}/.test(dateStr) ? dateStr : new Date().toISOString().slice(0, 10);
+  return valid.slice(0, 7); // "YYYY-MM"
+}
+
+const EXCEL_LOG_HEADERS = [
+  "ContactName", "InvoiceNumber", "Reference", "InvoiceDate", "DueDate",
+  "InventoryItemCode", "Description", "Quantity", "UnitAmount", "AccountCode", "TaxType", "LineTotal",
+];
+
+async function appendInvoiceRowsToExcelLog(env, monthKey, rows) {
+  const kvKey = `invoice_log_${monthKey}`;
+  const existingB64 = await env.XERO_TOKENS.get(kvKey);
+
+  let workbook;
+  let sheetRows;
+  if (existingB64) {
+    workbook = XLSX.read(existingB64, { type: "base64" });
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    sheetRows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+  } else {
+    workbook = XLSX.utils.book_new();
+    sheetRows = [EXCEL_LOG_HEADERS];
+  }
+
+  rows.forEach((r) => sheetRows.push(r));
+
+  const newSheet = XLSX.utils.aoa_to_sheet(sheetRows);
+  if (workbook.SheetNames.length) {
+    workbook.Sheets[workbook.SheetNames[0]] = newSheet;
+  } else {
+    XLSX.utils.book_append_sheet(workbook, newSheet, "Invoices");
+  }
+
+  const base64 = XLSX.write(workbook, { type: "base64", bookType: "xlsx" });
+  await env.XERO_TOKENS.put(kvKey, base64);
+
+  return { base64, filename: `${monthKey}-invoices.xlsx` };
 }
 
 function money(n) {
   return "$" + (Math.round((n + Number.EPSILON) * 100) / 100).toFixed(2);
 }
 
-async function sendSummaryEmail(env, { contactName, invoiceNumber, orderNumber, invoiceDate, dueDate, lineItems, appended }) {
+async function sendSummaryEmail(env, { contactName, invoiceNumber, orderNumber, invoiceDate, dueDate, lineItems, appended, excelAttachment }) {
   let subtotal = 0, gst = 0;
   const rowsHtml = lineItems.map((li) => {
     const lineTotal = (li.quantity || 0) * (li.unitAmount || 0);
@@ -515,6 +593,7 @@ async function sendSummaryEmail(env, { contactName, invoiceNumber, orderNumber, 
       to: env.COMPANY_EMAIL,
       subject: `${appended ? "Line added to invoice" : "Invoice"} ${invoiceNumber || ""} sent to Xero — ${contactName}`.trim(),
       html,
+      ...(excelAttachment ? { attachments: [{ filename: excelAttachment.filename, content: excelAttachment.base64 }] } : {}),
     }),
   });
 
